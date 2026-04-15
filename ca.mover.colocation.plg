@@ -2,10 +2,10 @@
 <!DOCTYPE PLUGIN [
   <!ENTITY name      "ca.mover.colocation">
   <!ENTITY author    "adman234">
-  <!ENTITY version   "2026.04.15">
+  <!ENTITY version   "2026.04.16">
   <!ENTITY pluginURL "https://raw.githubusercontent.com/adman234/ca.mover.colocation/master/ca.mover.colocation.plg">
   <!ENTITY pkgURL    "https://github.com/adman234/ca.mover.colocation/releases/download/&version;/ca.mover.colocation-&version;.txz">
-  <!ENTITY md5       "92cb0d22a59810f8db369f0a7f738870">
+  <!ENTITY md5       "cb576539b484fd843ea0d276d860d1c6">
 ]>
 
 <PLUGIN  name="&name;"
@@ -16,16 +16,18 @@
          min="6.9.0">
 
 <CHANGES>
+###2026.04.16
+- Fix UI: CRLF line endings caused page to render as one line (bold markers
+  showing literally, Apply button not working, all text running together)
+- Fix UI: shorten description lines to prevent table overflow
+- Simplify default rules file comments
+
 ###2026.04.15
 - Initial release
-- Folder colocation for CA Mover Tuning: pre-creates directories on specific
-  array disks so that files from the same logical group always land on the
-  same disk (e.g. all files in a TV show folder stay together)
+- Folder colocation for CA Mover Tuning
 - Generic rules system: any share, any sub-path, configurable anchor depth
-- Integrates as a Before Script for CA Mover Tuning — does not move files itself
-- Settings page in the Scheduler section alongside CA Mover Tuning
-- Auto-configures CA Mover Tuning Before Script on install if not already set
-- Removes itself cleanly from CA Mover Tuning config on uninstall
+- Integrates as a Before Script for CA Mover Tuning
+- Settings page in Scheduler section alongside CA Mover Tuning
 </CHANGES>
 
 <!--
