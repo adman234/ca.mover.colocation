@@ -1,0 +1,164 @@
+Menu="Scheduler:2b"
+Title="Mover Colocation"
+Tag="sitemap"
+---
+<?PHP
+/* -----------------------------------------------------------------------
+ * ca.mover.colocation — Settings Page
+ * Appears in Settings → Scheduler alongside CA Mover Tuning.
+ * ----------------------------------------------------------------------- */
+
+$plugin      = 'ca.mover.colocation';
+$cfg_dir     = "/boot/config/plugins/{$plugin}";
+$cfg_file    = "{$cfg_dir}/{$plugin}.cfg";
+$rules_file  = "{$cfg_dir}/colocation_rules.cfg";
+$script_path = "/usr/local/emhttp/plugins/{$plugin}/colocation_prep";
+$mover_cfg   = '/boot/config/plugins/ca.mover.tuning/ca.mover.tuning.cfg';
+
+// Load this plugin's config
+$cfg = @parse_ini_file($cfg_file) ?: [];
+$colocateEnabled = ($cfg['colocateEnabled'] ?? 'no') === 'yes' ? 'yes' : 'no';
+$logEnabled      = ($cfg['logEnabled']      ?? 'yes') === 'yes' ? 'yes' : 'no';
+
+// Load current rules text
+$rules_text = file_exists($rules_file) ? file_get_contents($rules_file) : '';
+
+// Check integration status with CA Mover Tuning
+$mover_tuning_installed = file_exists('/usr/local/emhttp/plugins/ca.mover.tuning/age_mover');
+$mover_tuning_cfg_exists = file_exists($mover_cfg);
+$configured_before = '';
+if ($mover_tuning_cfg_exists) {
+    $mt_cfg = @parse_ini_file($mover_cfg) ?: [];
+    $configured_before = $mt_cfg['beforeScript'] ?? '';
+}
+$is_before_script_set = ($configured_before === $script_path);
+$before_script_conflict = !empty($configured_before) && !$is_before_script_set;
+
+// Last log snippet
+$log_file = '/tmp/ca.mover.colocation/colocation_prep.log';
+$log_content = '';
+if (file_exists($log_file)) {
+    $lines = file($log_file);
+    $log_content = implode('', array_slice($lines, -40)); // last 40 lines
+}
+?>
+
+<script>
+function saveColocationSettings() {
+    var enabled = $('#colocateEnabled').val();
+    var logEnabled = $('#logEnabled').val();
+    var rules = $('#colocationRules').val();
+    $.post('/plugins/ca.mover.colocation/save_colocation.php', {
+        colocateEnabled: enabled,
+        logEnabled: logEnabled,
+        rules: rules
+    }, function(resp) {
+        if (resp.trim() === 'OK') {
+            swal({title:'Saved', text:'Colocation settings saved.', type:'success', timer:2000, showConfirmButton:false});
+        } else {
+            swal({title:'Error', text:resp, type:'error'});
+        }
+    }).fail(function() {
+        swal({title:'Error', text:'Could not save settings.', type:'error'});
+    });
+    return false;
+}
+
+function setBeforeScript() {
+    $.post('/plugins/ca.mover.colocation/save_colocation.php', {
+        action: 'set_before_script'
+    }, function(resp) {
+        if (resp.trim() === 'OK') {
+            location.reload();
+        } else {
+            swal({title:'Error', text:resp, type:'error'});
+        }
+    });
+    return false;
+}
+
+function clearBeforeScript() {
+    $.post('/plugins/ca.mover.colocation/save_colocation.php', {
+        action: 'clear_before_script'
+    }, function(resp) {
+        if (resp.trim() === 'OK') {
+            location.reload();
+        } else {
+            swal({title:'Error', text:resp, type:'error'});
+        }
+    });
+    return false;
+}
+</script>
+
+<?if (!$mover_tuning_installed):?>
+<p class='notice'>CA Mover Tuning is not installed. This plugin requires CA Mover Tuning to function.</p>
+<?endif;?>
+
+<form onsubmit="return saveColocationSettings();">
+
+**Enable Colocation:**
+: <select name='colocateEnabled' id='colocateEnabled' size='1'>
+  <option value='yes' <?=($colocateEnabled==='yes'?'selected':'')?>><?=_('Yes - pre-create directories to guide disk placement')?></option>
+  <option value='no'  <?=($colocateEnabled==='no' ?'selected':'')?>><?=_('No  - disabled')?></option>
+  </select>
+> When enabled, this plugin runs before CA Mover Tuning and pre-creates the correct directory on the target array disk. CA Mover Tuning then moves the file normally — user0 routes it to the pre-created directory automatically.
+
+**Enable Logging:**
+: <select name='logEnabled' id='logEnabled' size='1'>
+  <option value='yes' <?=($logEnabled==='yes'?'selected':'')?>><?=_('Yes')?></option>
+  <option value='no'  <?=($logEnabled==='no' ?'selected':'')?>><?=_('No')?></option>
+  </select>
+> Log file written to `/tmp/ca.mover.colocation/colocation_prep.log` each run.
+
+**Integration Status:**
+: <?if ($is_before_script_set):?>
+  <span style='color:green;'>&#10003; Configured</span> — CA Mover Tuning is set to run this plugin as its Before Script.
+  <button type='button' onclick='clearBeforeScript()' style='margin-left:12px;'>Remove</button>
+  <?elseif ($before_script_conflict):?>
+  <span style='color:orange;'>&#9888; Conflict</span> — CA Mover Tuning already has a different Before Script set: <code><?=htmlspecialchars($configured_before)?></code><br>
+  Please add <code><?=htmlspecialchars($script_path)?></code> to your existing script manually, or clear the current Before Script first.
+  <?elseif (!$mover_tuning_cfg_exists):?>
+  <span style='color:red;'>&#10005; CA Mover Tuning config not found</span>
+  <?else:?>
+  <span style='color:red;'>&#10005; Not configured</span> — CA Mover Tuning's Before Script is not set to this plugin.
+  <button type='button' onclick='setBeforeScript()' style='margin-left:12px;'>Configure Automatically</button>
+  <?endif;?>
+
+**Colocation Rules:**
+: <textarea id='colocationRules' name='rules' rows='18' style='width:100%;font-family:monospace;font-size:13px;'><?=htmlspecialchars($rules_text)?></textarea>
+> One rule per line. Lines beginning with `#` are comments and are ignored.
+> **Format:** `SHARE_NAME|SUBPATH|ANCHOR_DEPTH`
+>
+> `ANCHOR_DEPTH 0` — the SUBPATH folder itself is the unit. All files inside go to the same disk.
+> `ANCHOR_DEPTH 1` — each immediate sub-folder of SUBPATH is a unit. Each sub-folder gets its own disk.
+>
+> **Example rules for a `/data` share:**
+> ```
+> # Top-level folders — each stays on one disk
+> data|backups|0
+> data|photos|0
+> data|torrents|0
+> data|usenet|0
+>
+> # Media sub-libraries — each stays on one disk
+> data|media/audiobooks|0
+> data|media/books|0
+> data|media/music|0
+> data|media/podcasts|0
+>
+> # Movies and TV — each title sub-folder gets its own disk
+> data|media/movies|1
+> data|media/tv|1
+> ```
+
+: <input type='submit' value='Apply'>
+
+</form>
+
+<?if ($log_content):?>
+
+**Last Run Log:**
+: <pre style='background:#111;color:#ddd;padding:10px;font-size:12px;max-height:300px;overflow:auto;'><?=htmlspecialchars($log_content)?></pre>
+
+<?endif;?>

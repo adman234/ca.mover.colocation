@@ -1,0 +1,285 @@
+#!/bin/bash
+# ca.mover.colocation — Folder Colocation Prep Script
+# Version: 2026.04.15
+#
+# This script is designed to run as the "Before Script" in CA Mover Tuning.
+# It pre-creates directory structures on specific array disks BEFORE
+# CA Mover Tuning moves files from cache.  When CA Mover Tuning then
+# rsyncs a file to /mnt/user0/..., Unraid's user0 FUSE layer finds the
+# pre-created directory on the target disk and routes the file there.
+#
+# No files are moved by this script.  All file movement is still handled
+# entirely by CA Mover Tuning.
+#
+# Configuration files (on boot drive, persisted across reboots):
+#   /boot/config/plugins/ca.mover.colocation/ca.mover.colocation.cfg
+#   /boot/config/plugins/ca.mover.colocation/colocation_rules.cfg
+#
+# Rules format (colocation_rules.cfg):
+#   SHARE_NAME|SUBPATH|ANCHOR_DEPTH
+#   Lines starting with # are ignored.
+#
+#   ANCHOR_DEPTH 0 = the SUBPATH folder is the colocation unit
+#                    (all files anywhere inside go to the same disk)
+#   ANCHOR_DEPTH 1 = each immediate sub-folder of SUBPATH is a unit
+#                    (each sub-folder gets its own disk)
+#
+# Examples:
+#   data|backups|0          all of /data/backups → one disk
+#   data|media/movies|1     each /data/media/movies/<title>/ → one disk
+# ---------------------------------------------------------------------------
+
+PLUGIN="ca.mover.colocation"
+CFG_DIR="/boot/config/plugins/${PLUGIN}"
+MAIN_CFG="${CFG_DIR}/${PLUGIN}.cfg"
+RULES_FILE="${CFG_DIR}/colocation_rules.cfg"
+LOG_DIR="/tmp/${PLUGIN}"
+LOG_FILE="${LOG_DIR}/colocation_prep.log"
+
+# ---------------------------------------------------------------------------
+# Logging
+# ---------------------------------------------------------------------------
+_log_enabled=""
+
+init_log() {
+    mkdir -p "$LOG_DIR"
+    # Rotate: keep last 5 runs by moving current log to .old
+    [ -f "$LOG_FILE" ] && mv -f "$LOG_FILE" "${LOG_FILE}.old"
+    _log_enabled=$(cfg_read "$MAIN_CFG" "logEnabled")
+    [ -z "$_log_enabled" ] && _log_enabled="yes"
+}
+
+log() {
+    local msg="$1"
+    local ts
+    ts=$(date +"%T.%3N")
+    if [ "$_log_enabled" = "yes" ]; then
+        if [ -t 1 ]; then
+            echo "$ts colocation: $msg"
+        fi
+        echo "$ts colocation: $msg" >> "$LOG_FILE"
+    fi
+}
+
+# ---------------------------------------------------------------------------
+# Config helpers
+# ---------------------------------------------------------------------------
+cfg_read() {
+    local file="$1" key="$2"
+    [ -f "$file" ] || { echo ""; return; }
+    grep "^${key}=" "$file" | head -1 | cut -d'"' -f2
+}
+
+# ---------------------------------------------------------------------------
+# Anchor computation
+# Given a share name and a path relative to the share root, return the
+# anchor directory (also relative to share root) per the rules file,
+# or empty string if no rule matches.
+# ---------------------------------------------------------------------------
+get_anchor() {
+    local sharename="$1"
+    local rel_path="$2"   # e.g. "media/movies/Inception/movie.mkv"
+
+    local best_subpath="" best_depth=0 best_len=0
+
+    while IFS='|' read -r rule_share rule_subpath rule_depth; do
+        # Skip comments and blank lines
+        [[ "$rule_share" =~ ^[[:space:]]*# ]] && continue
+        [[ -z "$rule_share" ]]               && continue
+
+        [ "$rule_share" = "$sharename" ] || continue
+
+        rule_subpath="${rule_subpath%/}"   # strip trailing slash
+        local len="${#rule_subpath}"
+
+        # Check if rel_path is inside (or equal to) this subpath
+        if [[ "$rel_path" == "${rule_subpath}/"* || "$rel_path" == "$rule_subpath" ]]; then
+            if (( len > best_len )); then
+                best_len="$len"
+                best_subpath="$rule_subpath"
+                best_depth="${rule_depth:-0}"
+            fi
+        fi
+    done < "$RULES_FILE"
+
+    [ -z "$best_subpath" ] && { echo ""; return; }
+
+    # Build the anchor by walking `best_depth` components past best_subpath
+    local remaining="${rel_path#${best_subpath}/}"
+    local anchor="$best_subpath"
+
+    local i
+    for (( i=0; i<best_depth; i++ )); do
+        local component="${remaining%%/*}"
+        [ -z "$component" ] && break
+        anchor="${anchor}/${component}"
+        if [[ "$remaining" == *"/"* ]]; then
+            remaining="${remaining#*/}"
+        else
+            break
+        fi
+    done
+
+    echo "$anchor"
+}
+
+# ---------------------------------------------------------------------------
+# Disk selection
+# ---------------------------------------------------------------------------
+
+# Find which array disk already has at least one file inside the anchor dir.
+# Returns disk name (e.g. "disk1") or empty.
+find_disk_with_files() {
+    local sharename="$1" anchor="$2"
+    local disk check
+
+    for disk in /mnt/disk[0-9]*/ /mnt/disk[1-9][0-9]*/; do
+        [ -d "$disk" ] || continue
+        disk="${disk%/}"
+        check="${disk}/${sharename}/${anchor}"
+        if [ -d "$check" ] && \
+           find "$check" -maxdepth 50 -type f 2>/dev/null | head -1 | grep -q .; then
+            echo "${disk##/mnt/}"
+            return
+        fi
+    done
+    echo ""
+}
+
+# Find the array disk with the most free space.
+# Returns disk name (e.g. "disk2") or empty.
+find_best_disk() {
+    local best_disk="" best_free=0 free_space disk
+
+    for disk in /mnt/disk[0-9]*/ /mnt/disk[1-9][0-9]*/; do
+        [ -d "$disk" ] || continue
+        disk="${disk%/}"
+        # Skip if not an actual mounted disk (e.g. diskcache)
+        mountpoint -q "$disk" 2>/dev/null || continue
+        free_space=$(df -B1 "$disk" 2>/dev/null | awk 'NR==2 {print $4}')
+        [ -z "$free_space" ] && continue
+        (( free_space > best_free )) && { best_free="$free_space"; best_disk="${disk##/mnt/}"; }
+    done
+
+    echo "$best_disk"
+}
+
+# ---------------------------------------------------------------------------
+# Per-run cache: anchor → disk  (avoids re-scanning disks for same anchor)
+# ---------------------------------------------------------------------------
+declare -A _anchor_disk_cache
+
+get_target_disk() {
+    local sharename="$1" anchor="$2"
+    local cache_key="${sharename}|${anchor}"
+
+    if [ -n "${_anchor_disk_cache[$cache_key]+x}" ]; then
+        echo "${_anchor_disk_cache[$cache_key]}"
+        return
+    fi
+
+    local disk
+    disk=$(find_disk_with_files "$sharename" "$anchor")
+
+    if [ -z "$disk" ]; then
+        log "  No existing disk for anchor '$sharename/$anchor' — picking disk with most free space"
+        disk=$(find_best_disk)
+    else
+        log "  Anchor '$sharename/$anchor' → existing disk: $disk"
+    fi
+
+    _anchor_disk_cache[$cache_key]="$disk"
+    echo "$disk"
+}
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+init_log
+
+# Check enabled
+ENABLED=$(cfg_read "$MAIN_CFG" "colocateEnabled")
+if [ "$ENABLED" != "yes" ]; then
+    log "Colocation prep: disabled — skipping"
+    exit 0
+fi
+
+[ -f "$RULES_FILE" ] || { log "Rules file not found: $RULES_FILE — skipping"; exit 0; }
+
+log "========== Colocation Prep Start =========="
+
+# Build a unique list of share names referenced in the rules file
+declare -A _seen_shares
+while IFS='|' read -r rule_share _rest; do
+    [[ "$rule_share" =~ ^[[:space:]]*# ]] && continue
+    [[ -z "$rule_share" ]]               && continue
+    _seen_shares["$rule_share"]=1
+done < "$RULES_FILE"
+
+if [ "${#_seen_shares[@]}" -eq 0 ]; then
+    log "No rules found in $RULES_FILE — skipping"
+    exit 0
+fi
+
+for sharename in "${!_seen_shares[@]}"; do
+    share_cfg="/boot/config/shares/${sharename}.cfg"
+    if [ ! -f "$share_cfg" ]; then
+        log "Share config not found for '$sharename': $share_cfg — skipping"
+        continue
+    fi
+
+    # Determine the cache pool this share uses
+    cache_pool=$(grep "^shareCachePool=" "$share_cfg" | cut -d'"' -f2)
+    [ -z "$cache_pool" ] && cache_pool="cache"
+
+    cache_path="/mnt/${cache_pool}/${sharename}"
+    if [ ! -d "$cache_path" ]; then
+        log "Share '$sharename' not present on cache pool '$cache_pool' — skipping"
+        continue
+    fi
+
+    log "--- Processing share: $sharename (cache: /mnt/${cache_pool}) ---"
+
+    dir_count=0
+    skip_count=0
+
+    # Walk every file currently on cache for this share
+    while IFS= read -r filepath; do
+        # Path relative to share root (e.g. "media/movies/Inception/movie.mkv")
+        rel_path="${filepath#${cache_path}/}"
+
+        # Compute the anchor directory for this file
+        anchor=$(get_anchor "$sharename" "$rel_path")
+        if [ -z "$anchor" ]; then
+            (( skip_count++ ))
+            continue
+        fi
+
+        # Determine (and cache) the target disk for this anchor
+        target_disk=$(get_target_disk "$sharename" "$anchor")
+        if [ -z "$target_disk" ]; then
+            log "  WARNING: Could not find a suitable disk for '$sharename/$anchor'"
+            continue
+        fi
+
+        # Pre-create the full parent directory on the target disk
+        # This is what guides user0 to put the file on this disk when
+        # CA Mover Tuning later rsyncs it via /mnt/user0.
+        target_dir="/mnt/${target_disk}/${sharename}/$(dirname "$rel_path")"
+
+        if [ ! -d "$target_dir" ]; then
+            if mkdir -p "$target_dir" 2>/dev/null; then
+                log "  mkdir: $target_dir"
+                (( dir_count++ ))
+            else
+                log "  WARNING: Failed to create $target_dir"
+            fi
+        fi
+
+    done < <(find "$cache_path" -type f 2>/dev/null)
+
+    log "  Directories pre-created: $dir_count | Files without matching rules: $skip_count"
+done
+
+log "========== Colocation Prep Done ==========="
+exit 0

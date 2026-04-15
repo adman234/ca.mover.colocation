@@ -1,0 +1,164 @@
+<?xml version='1.0' standalone='yes'?>
+<!DOCTYPE PLUGIN [
+  <!ENTITY name      "ca.mover.colocation">
+  <!ENTITY author    "adman234">
+  <!ENTITY version   "2026.04.15">
+  <!ENTITY pluginURL "https://raw.githubusercontent.com/adman234/ca.mover.colocation/master/ca.mover.colocation.plg">
+  <!ENTITY pkgURL    "https://github.com/adman234/ca.mover.colocation/releases/download/&version;/ca.mover.colocation-&version;.txz">
+  <!ENTITY md5       "7f17f8ffeed47cf0bf2a5189ccfb724a">
+]>
+
+<PLUGIN  name="&name;"
+         author="&author;"
+         version="&version;"
+         pluginURL="&pluginURL;"
+         support="https://github.com/adman234/ca.mover.colocation/issues"
+         min="6.9.0">
+
+<CHANGES>
+###2026.04.15
+- Initial release
+- Folder colocation for CA Mover Tuning: pre-creates directories on specific array disks so that files from the same logical group (e.g. all files in a TV show folder) always land on the same disk
+- Generic rules system: any share, any sub-path, configurable anchor depth
+- Integrates as a Before Script for CA Mover Tuning — does not move files itself
+- Settings page in the Scheduler section alongside CA Mover Tuning
+- Auto-configures CA Mover Tuning's Before Script on install (if not already set)
+- Removes itself cleanly from CA Mover Tuning config on uninstall
+</CHANGES>
+
+<!--
+  Pre-install check: CA Mover Tuning must already be installed.
+-->
+<FILE Run="/usr/bin/php">
+<INLINE>
+<?php
+$mover_tuning = '/usr/local/emhttp/plugins/ca.mover.tuning/age_mover';
+if (!file_exists($mover_tuning)) {
+    echo "CA Mover Tuning is not installed.\n";
+    echo "Please install CA Mover Tuning first, then install this plugin.\n";
+    exit(1);
+}
+$unraid_ver = trim(shell_exec("grep '^version=' /etc/unraid-version | cut -d'\"' -f2") ?: '0.0.0');
+if (version_compare($unraid_ver, '6.9.0', '<')) {
+    echo "This plugin requires Unraid 6.9.0 or later (detected: $unraid_ver).\n";
+    exit(1);
+}
+echo "Pre-install checks passed.\n";
+?>
+</INLINE>
+</FILE>
+
+<!--
+  Download and install the plugin package.
+  (The package is a .txz archive of the source/ directory tree.)
+-->
+<FILE Name="/boot/config/plugins/&name;/&name;-&version;.txz" Run="upgradepkg --install-new">
+<URL>&pkgURL;</URL>
+<MD5>&md5;</MD5>
+</FILE>
+
+<!--
+  Post-install setup script.
+-->
+<FILE Run="/bin/bash">
+<INLINE>
+PLUGIN="ca.mover.colocation"
+CFG_DIR="/boot/config/plugins/${PLUGIN}"
+CFG_FILE="${CFG_DIR}/${PLUGIN}.cfg"
+DEFAULT_CFG="/usr/local/emhttp/plugins/${PLUGIN}/default.cfg"
+SCRIPT_PATH="/usr/local/emhttp/plugins/${PLUGIN}/colocation_prep"
+MOVER_TUNING_CFG="/boot/config/plugins/ca.mover.tuning/ca.mover.tuning.cfg"
+
+# Ensure boot-drive config directory exists
+mkdir -p "${CFG_DIR}"
+
+# Merge defaults into live config (add any missing keys)
+if [ -f "${DEFAULT_CFG}" ]; then
+  while IFS='=' read -r key val; do
+    [[ "$key" =~ ^#.*$ ]] && continue
+    [ -z "$key" ] && continue
+    if ! grep -q "^${key}=" "${CFG_FILE}" 2>/dev/null; then
+      echo "${key}=${val}" >> "${CFG_FILE}"
+    fi
+  done < "${DEFAULT_CFG}"
+fi
+
+# Create an empty rules file if none exists
+if [ ! -f "${CFG_DIR}/colocation_rules.cfg" ]; then
+  cat > "${CFG_DIR}/colocation_rules.cfg" << 'RULES_EOF'
+# Folder Colocation Rules for CA Mover Colocation Plugin
+#
+# Format: SHARE_NAME|SUBPATH|ANCHOR_DEPTH
+#
+# ANCHOR_DEPTH 0 = SUBPATH folder itself stays on one disk
+# ANCHOR_DEPTH 1 = each immediate sub-folder of SUBPATH gets its own disk
+#
+# Examples for a "data" share:
+#
+# data|backups|0
+# data|photos|0
+# data|torrents|0
+# data|usenet|0
+# data|media/audiobooks|0
+# data|media/books|0
+# data|media/music|0
+# data|media/podcasts|0
+# data|media/movies|1
+# data|media/tv|1
+RULES_EOF
+fi
+
+# Make the before-script executable
+chmod +x "${SCRIPT_PATH}"
+
+# Auto-configure CA Mover Tuning's Before Script if the field is currently empty
+if [ -f "${MOVER_TUNING_CFG}" ]; then
+  current_before=$(grep 'beforeScript=' "${MOVER_TUNING_CFG}" | cut -d'"' -f2)
+  if [ -z "${current_before}" ]; then
+    sed -i "s|beforeScript=\"\"|beforeScript=\"${SCRIPT_PATH}\"|" "${MOVER_TUNING_CFG}"
+    echo "Configured CA Mover Tuning Before Script: ${SCRIPT_PATH}"
+  elif [ "${current_before}" = "${SCRIPT_PATH}" ]; then
+    echo "CA Mover Tuning Before Script already set correctly."
+  else
+    echo "NOTE: CA Mover Tuning already has a Before Script: ${current_before}"
+    echo "      Please manually add ${SCRIPT_PATH} to your existing Before Script,"
+    echo "      or use the Colocation settings page to manage this."
+  fi
+fi
+
+echo ""
+echo "ca.mover.colocation installed successfully."
+echo "Configure your rules at Settings → Scheduler → Mover Colocation."
+</INLINE>
+</FILE>
+
+<!--
+  Uninstall / remove script.
+-->
+<FILE Run="/bin/bash" Method="remove">
+<INLINE>
+PLUGIN="ca.mover.colocation"
+SCRIPT_PATH="/usr/local/emhttp/plugins/${PLUGIN}/colocation_prep"
+MOVER_TUNING_CFG="/boot/config/plugins/ca.mover.tuning/ca.mover.tuning.cfg"
+
+# Remove our before-script from CA Mover Tuning config
+if [ -f "${MOVER_TUNING_CFG}" ]; then
+  current_before=$(grep 'beforeScript=' "${MOVER_TUNING_CFG}" | cut -d'"' -f2)
+  if [ "${current_before}" = "${SCRIPT_PATH}" ]; then
+    sed -i 's|beforeScript="[^"]*"|beforeScript=""|' "${MOVER_TUNING_CFG}"
+    echo "Removed colocation Before Script from CA Mover Tuning config."
+  fi
+fi
+
+# Remove the installed package files
+removepkg ca.mover.colocation
+
+# Remove runtime logs (keep boot-drive config — user may reinstall)
+rm -rf /tmp/ca.mover.colocation
+
+echo "ca.mover.colocation removed."
+echo "Your rules file is kept at /boot/config/plugins/ca.mover.colocation/ in case you reinstall."
+</INLINE>
+</FILE>
+
+</PLUGIN>
