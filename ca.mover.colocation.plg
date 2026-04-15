@@ -83,8 +83,10 @@ if [ ! -f "${CFG_FILE}" ]; then
 fi
 
 # Create a starter rules file if none exists
-if [ ! -f "${RULES_FILE}" ] && [ -f "${RULES_DEFAULT}" ]; then
-    cp "${RULES_DEFAULT}" "${RULES_FILE}"
+if [ ! -f "${RULES_FILE}" ]; then
+    if [ -f "${RULES_DEFAULT}" ]; then
+        cp "${RULES_DEFAULT}" "${RULES_FILE}"
+    fi
 fi
 
 # Make the before-script executable
