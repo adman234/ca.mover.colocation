@@ -5,7 +5,7 @@
   <!ENTITY version   "2026.04.15">
   <!ENTITY pluginURL "https://raw.githubusercontent.com/adman234/ca.mover.colocation/master/ca.mover.colocation.plg">
   <!ENTITY pkgURL    "https://github.com/adman234/ca.mover.colocation/releases/download/&version;/ca.mover.colocation-&version;.txz">
-  <!ENTITY md5       "27bb54842d87388c4d1e9abe0c534026">
+  <!ENTITY md5       "92cb0d22a59810f8db369f0a7f738870">
 ]>
 
 <PLUGIN  name="&name;"

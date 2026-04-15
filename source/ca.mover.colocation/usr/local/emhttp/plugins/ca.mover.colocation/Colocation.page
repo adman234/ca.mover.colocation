@@ -22,7 +22,7 @@ if ($mover_tuning_cfg_exists) {
     $mt_cfg            = @parse_ini_file($mover_cfg) ?: [];
     $configured_before = $mt_cfg['beforeScript'] ?? '';
 }
-$is_before_script_set  = ($configured_before === $script_path);
+$is_before_script_set   = ($configured_before === $script_path);
 $before_script_conflict = !empty($configured_before) && !$is_before_script_set;
 
 $log_file    = '/tmp/ca.mover.colocation/colocation_prep.log';
@@ -40,7 +40,6 @@ function saveColocationSettings() {
     btn.disabled = true;
     status.innerHTML = 'Saving&hellip;';
     status.style.color = '';
-
     $.post('/plugins/ca.mover.colocation/save_colocation.php', {
         colocateEnabled: $('#colocateEnabled').val(),
         logEnabled:      $('#logEnabled').val(),
@@ -56,30 +55,21 @@ function saveColocationSettings() {
         }
     })
     .fail(function() {
-        status.textContent = 'Error: request failed.';
+        status.textContent = 'Request failed.';
         status.style.color = 'red';
     })
     .always(function() { btn.disabled = false; });
-
     return false;
 }
-
 function setBeforeScript() {
-    var status = document.getElementById('colocIntegStatus');
-    $.post('/plugins/ca.mover.colocation/save_colocation.php', { action: 'set_before_script' })
-    .done(function(resp) {
-        if (resp.trim() === 'OK') { location.reload(); }
-        else { status.textContent = 'Error: ' + resp; status.style.color = 'red'; }
-    });
+    var s = document.getElementById('colocIntegStatus');
+    $.post('/plugins/ca.mover.colocation/save_colocation.php', {action:'set_before_script'})
+    .done(function(r){ if(r.trim()==='OK'){location.reload();}else{s.textContent='Error: '+r;s.style.color='red';} });
 }
-
 function clearBeforeScript() {
-    var status = document.getElementById('colocIntegStatus');
-    $.post('/plugins/ca.mover.colocation/save_colocation.php', { action: 'clear_before_script' })
-    .done(function(resp) {
-        if (resp.trim() === 'OK') { location.reload(); }
-        else { status.textContent = 'Error: ' + resp; status.style.color = 'red'; }
-    });
+    var s = document.getElementById('colocIntegStatus');
+    $.post('/plugins/ca.mover.colocation/save_colocation.php', {action:'clear_before_script'})
+    .done(function(r){ if(r.trim()==='OK'){location.reload();}else{s.textContent='Error: '+r;s.style.color='red';} });
 }
 </script>
 
@@ -94,36 +84,36 @@ function clearBeforeScript() {
   <option value='yes' <?=($colocateEnabled==='yes'?'selected':'')?>><?=_('Yes')?></option>
   <option value='no'  <?=($colocateEnabled==='no' ?'selected':'')?>><?=_('No')?></option>
   </select>
-> Pre-creates directories on the correct array disk before CA Mover Tuning runs, so files from the same group always land on the same disk.
+> Pre-creates directories on the target disk before CA Mover Tuning runs.
 
 **Enable Logging:**
 : <select name='logEnabled' id='logEnabled' size='1'>
   <option value='yes' <?=($logEnabled==='yes'?'selected':'')?>><?=_('Yes')?></option>
   <option value='no'  <?=($logEnabled==='no' ?'selected':'')?>><?=_('No')?></option>
   </select>
-> Writes a log to /tmp/ca.mover.colocation/colocation_prep.log each run.
+> Log: /tmp/ca.mover.colocation/colocation_prep.log
 
 **Integration Status:**
 : <span id='colocIntegStatus'><?php
   if ($is_before_script_set) {
-      echo "<span style='color:green;'>&#10003; Configured</span> &mdash; CA Mover Tuning Before Script is set correctly. ";
+      echo "<span style='color:green;'>&#10003; Configured</span> &mdash; Before Script is set correctly. ";
       echo "<button type='button' onclick='clearBeforeScript()'>Remove</button>";
   } elseif ($before_script_conflict) {
-      echo "<span style='color:orange;'>&#9888; Conflict</span> &mdash; Before Script is already set to a different value:<br>";
+      echo "<span style='color:orange;'>&#9888; Conflict</span> &mdash; Before Script already set to:<br>";
       echo "<code>".htmlspecialchars($configured_before)."</code><br>";
       echo "Add <code>".htmlspecialchars($script_path)."</code> to that script manually.";
   } elseif (!$mover_tuning_cfg_exists) {
       echo "<span style='color:red;'>&#10005; CA Mover Tuning config not found.</span>";
   } else {
       echo "<span style='color:red;'>&#10005; Not configured.</span> ";
-      echo "<button type='button' onclick='setBeforeScript()'>Configure Automatically</button>";
+      echo "<button type='button' onclick='setBeforeScript()'>Configure</button>";
   }
   ?></span>
 
 **Colocation Rules:**
-: <textarea id='colocationRules' name='rules' rows='16' style='width:100%;font-family:monospace;font-size:13px;white-space:pre;'><?=htmlspecialchars($rules_text)?></textarea>
-> Format: SHARE_NAME|SUBPATH|ANCHOR_DEPTH &nbsp; (one rule per line, # = comment)
-> Depth 0 = whole SUBPATH stays on one disk. &nbsp; Depth 1 = each sub-folder of SUBPATH gets its own disk.
+: <textarea id='colocationRules' name='rules' rows='16' style='width:100%;font-family:monospace;font-size:13px;'><?=htmlspecialchars($rules_text)?></textarea>
+> Format: SHARE|SUBPATH|DEPTH &mdash; one rule per line, # = comment
+> Depth 0: whole SUBPATH on one disk. &nbsp; Depth 1: each subfolder on its own disk.
 
 : <input type='submit' id='colocSaveBtn' value='Apply'>&nbsp;&nbsp;<span id='colocSaveStatus'></span>
 
