@@ -1,0 +1,19 @@
+# Folder Colocation Rules for CA Mover Colocation Plugin
+#
+# Format: SHARE_NAME|SUBPATH|ANCHOR_DEPTH
+#
+# ANCHOR_DEPTH 0 = the SUBPATH folder itself stays on one disk
+# ANCHOR_DEPTH 1 = each immediate sub-folder of SUBPATH gets its own disk
+#
+# Examples for a "data" share:
+#
+# data|backups|0
+# data|photos|0
+# data|torrents|0
+# data|usenet|0
+# data|media/audiobooks|0
+# data|media/books|0
+# data|media/music|0
+# data|media/podcasts|0
+# data|media/movies|1
+# data|media/tv|1
