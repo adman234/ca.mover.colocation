@@ -59,17 +59,14 @@ function saveColocationSettings() {
         status.style.color = 'red';
     })
     .always(function() { btn.disabled = false; });
-    return false;
 }
 function setBeforeScript() {
-    var s = document.getElementById('colocIntegStatus');
     $.post('/plugins/ca.mover.colocation/save_colocation.php', {action:'set_before_script'})
-    .done(function(r){ if(r.trim()==='OK'){location.reload();}else{s.textContent='Error: '+r;s.style.color='red';} });
+    .done(function(r){ if(r.trim()==='OK'){location.reload();}else{alert('Error: '+r);} });
 }
 function clearBeforeScript() {
-    var s = document.getElementById('colocIntegStatus');
     $.post('/plugins/ca.mover.colocation/save_colocation.php', {action:'clear_before_script'})
-    .done(function(r){ if(r.trim()==='OK'){location.reload();}else{s.textContent='Error: '+r;s.style.color='red';} });
+    .done(function(r){ if(r.trim()==='OK'){location.reload();}else{alert('Error: '+r);} });
 }
 </script>
 
@@ -77,26 +74,28 @@ function clearBeforeScript() {
 <p class='notice'>CA Mover Tuning is not installed. Please install it before using this plugin.</p>
 <?endif;?>
 
-<form onsubmit="return saveColocationSettings();">
+<form markdown="1">
 
-**Enable Colocation:**
+Enable Colocation:
 : <select name='colocateEnabled' id='colocateEnabled' size='1'>
   <option value='yes' <?=($colocateEnabled==='yes'?'selected':'')?>><?=_('Yes')?></option>
   <option value='no'  <?=($colocateEnabled==='no' ?'selected':'')?>><?=_('No')?></option>
   </select>
+
 > Pre-creates directories on the target disk before CA Mover Tuning runs.
 
-**Enable Logging:**
+Enable Logging:
 : <select name='logEnabled' id='logEnabled' size='1'>
   <option value='yes' <?=($logEnabled==='yes'?'selected':'')?>><?=_('Yes')?></option>
   <option value='no'  <?=($logEnabled==='no' ?'selected':'')?>><?=_('No')?></option>
   </select>
-> Log: /tmp/ca.mover.colocation/colocation_prep.log
 
-**Integration Status:**
-: <span id='colocIntegStatus'><?php
+> Writes to /tmp/ca.mover.colocation/colocation_prep.log each run.
+
+Integration Status:
+: <?php
   if ($is_before_script_set) {
-      echo "<span style='color:green;'>&#10003; Configured</span> &mdash; Before Script is set correctly. ";
+      echo "<span style='color:green;'>&#10003; Configured</span> &mdash; Before Script is set. ";
       echo "<button type='button' onclick='clearBeforeScript()'>Remove</button>";
   } elseif ($before_script_conflict) {
       echo "<span style='color:orange;'>&#9888; Conflict</span> &mdash; Before Script already set to:<br>";
@@ -108,20 +107,22 @@ function clearBeforeScript() {
       echo "<span style='color:red;'>&#10005; Not configured.</span> ";
       echo "<button type='button' onclick='setBeforeScript()'>Configure</button>";
   }
-  ?></span>
+  ?>
 
-**Colocation Rules:**
+Colocation Rules:
 : <textarea id='colocationRules' name='rules' rows='16' style='width:100%;font-family:monospace;font-size:13px;'><?=htmlspecialchars($rules_text)?></textarea>
-> Format: SHARE|SUBPATH|DEPTH &mdash; one rule per line, # = comment
-> Depth 0: whole SUBPATH on one disk. &nbsp; Depth 1: each subfolder on its own disk.
 
-: <input type='submit' id='colocSaveBtn' value='Apply'>&nbsp;&nbsp;<span id='colocSaveStatus'></span>
+> Format: SHARE|SUBPATH|DEPTH &mdash; one rule per line, # = comment
+> Depth 0: whole SUBPATH on one disk. Depth 1: each subfolder on its own disk.
+
+&nbsp;
+: <input type='button' id='colocSaveBtn' value='Apply' onclick='saveColocationSettings()'>&nbsp;&nbsp;<span id='colocSaveStatus'></span>
 
 </form>
 
 <?if ($log_content):?>
 
-**Last Run Log:**
+Last Run Log:
 : <pre style='background:#111;color:#ddd;padding:10px;font-size:12px;max-height:300px;overflow:auto;'><?=$log_content?></pre>
 
 <?endif;?>

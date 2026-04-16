@@ -2,10 +2,10 @@
 <!DOCTYPE PLUGIN [
   <!ENTITY name      "ca.mover.colocation">
   <!ENTITY author    "adman234">
-  <!ENTITY version   "2026.04.16">
+  <!ENTITY version   "2026.04.17">
   <!ENTITY pluginURL "https://raw.githubusercontent.com/adman234/ca.mover.colocation/master/ca.mover.colocation.plg">
   <!ENTITY pkgURL    "https://github.com/adman234/ca.mover.colocation/releases/download/&version;/ca.mover.colocation-&version;.txz">
-  <!ENTITY md5       "cb576539b484fd843ea0d276d860d1c6">
+  <!ENTITY md5       "c9e2fbf9bcd32e093932334b629507dc">
 ]>
 
 <PLUGIN  name="&name;"
@@ -16,11 +16,14 @@
          min="6.9.0">
 
 <CHANGES>
+###2026.04.17
+- Fix UI: add markdown="1" to form tag — without it Unraid's page processor
+  does not parse label/value/description syntax inside form blocks at all
+- Fix UI: change label syntax from **Label:** to plain Label: (correct Unraid format)
+- Apply button now uses type=button onclick instead of form submit
+
 ###2026.04.16
-- Fix UI: CRLF line endings caused page to render as one line (bold markers
-  showing literally, Apply button not working, all text running together)
-- Fix UI: shorten description lines to prevent table overflow
-- Simplify default rules file comments
+- Fix CRLF line endings in package; shorten description lines
 
 ###2026.04.15
 - Initial release
