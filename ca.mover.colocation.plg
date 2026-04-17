@@ -2,10 +2,10 @@
 <!DOCTYPE PLUGIN [
   <!ENTITY name      "ca.mover.colocation">
   <!ENTITY author    "adman234">
-  <!ENTITY version   "2026.04.17">
+  <!ENTITY version   "2026.04.18">
   <!ENTITY pluginURL "https://raw.githubusercontent.com/adman234/ca.mover.colocation/master/ca.mover.colocation.plg">
   <!ENTITY pkgURL    "https://github.com/adman234/ca.mover.colocation/releases/download/&version;/ca.mover.colocation-&version;.txz">
-  <!ENTITY md5       "c9e2fbf9bcd32e093932334b629507dc">
+  <!ENTITY md5       "9b7c23d5ce8b4138ae247a63660ff0dc">
 ]>
 
 <PLUGIN  name="&name;"
@@ -16,6 +16,12 @@
          min="6.9.0">
 
 <CHANGES>
+###2026.04.18
+- Fix disk cache bug: get_target_disk was called via $() subshell, so cache
+  writes were discarded on every call — causing one disk scan per file instead
+  of one per unique anchor. Now uses a global result variable to avoid subshell.
+  Log will now show each anchor decision once instead of once per file.
+
 ###2026.04.17
 - Fix UI: add markdown="1" to form tag — without it Unraid's page processor
   does not parse label/value/description syntax inside form blocks at all

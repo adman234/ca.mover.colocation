@@ -166,15 +166,19 @@ find_best_disk() {
 
 # ---------------------------------------------------------------------------
 # Per-run cache: anchor → disk  (avoids re-scanning disks for same anchor)
+# NOTE: get_target_disk writes to _target_disk_result instead of echoing so
+# that it runs in the current shell — $(func) would use a subshell and lose
+# any writes to _anchor_disk_cache, defeating the cache entirely.
 # ---------------------------------------------------------------------------
 declare -A _anchor_disk_cache
+_target_disk_result=""
 
 get_target_disk() {
     local sharename="$1" anchor="$2"
     local cache_key="${sharename}|${anchor}"
 
     if [ -n "${_anchor_disk_cache[$cache_key]+x}" ]; then
-        echo "${_anchor_disk_cache[$cache_key]}"
+        _target_disk_result="${_anchor_disk_cache[$cache_key]}"
         return
     fi
 
@@ -189,7 +193,7 @@ get_target_disk() {
     fi
 
     _anchor_disk_cache[$cache_key]="$disk"
-    echo "$disk"
+    _target_disk_result="$disk"
 }
 
 # ---------------------------------------------------------------------------
@@ -255,8 +259,10 @@ for sharename in "${!_seen_shares[@]}"; do
             continue
         fi
 
-        # Determine (and cache) the target disk for this anchor
-        target_disk=$(get_target_disk "$sharename" "$anchor")
+        # Determine (and cache) the target disk for this anchor.
+        # Call without $() so the function runs in this shell and the cache sticks.
+        get_target_disk "$sharename" "$anchor"
+        target_disk="$_target_disk_result"
         if [ -z "$target_disk" ]; then
             log "  WARNING: Could not find a suitable disk for '$sharename/$anchor'"
             continue
